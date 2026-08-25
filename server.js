@@ -47,7 +47,11 @@ const wss = new WebSocket.Server({
 // ============================================
 
 const salas = new Map();
+// ========================================
+// LIMITE DE PARTICIPANTES
+// ========================================
 
+const MAX_PARTICIPANTES = 10;
 
 // ============================================
 // GERAR ID DO PARTICIPANTE
@@ -109,7 +113,28 @@ wss.on("connection", (socket) => {
 
                     return;
 
-                }
+               // ========================================
+// VERIFICAR LIMITE DA SALA
+// ========================================
+
+if (participantes.size >= MAX_PARTICIPANTES) {
+
+    socket.send(JSON.stringify({
+
+        tipo: "sala-cheia",
+
+        limite: MAX_PARTICIPANTES
+
+    }));
+
+    console.log(
+        `🚫 Sala ${codigoSala} está cheia.`
+    );
+
+    socket.close();
+
+    return;
+}
 
 
                 // Criar sala
