@@ -1,17 +1,7 @@
 // ============================================
 // LinkTalk - Servidor de Sinalização
-// Arquivo: server.js
+// Vários participantes + WebRTC
 // ============================================
-//
-// Este servidor será responsável por:
-// 👥 Saber quem está em cada sala
-// 🔗 Conectar os participantes
-// 📡 Enviar mensagens entre eles
-//
-// Mais tarde, ele será usado pelo WebRTC
-// para conectar câmera e microfone.
-// ============================================
-
 
 const http = require("http");
 const WebSocket = require("ws");
@@ -45,14 +35,14 @@ const wss = new WebSocket.Server({
 // SALAS
 // ============================================
 //
-// Cada sala terá uma lista de participantes.
+// Cada sala possui vários participantes.
 //
-// Exemplo:
-//
-// salas
+// sala
 // └── ABCD-1234
-//     ├── pessoa 1
-//     └── pessoa 2
+//     ├── participante 1
+//     ├── participante 2
+//     ├── participante 3
+//     └── participante 4
 //
 // ============================================
 
@@ -60,20 +50,39 @@ const salas = new Map();
 
 
 // ============================================
-// QUANDO ALGUÉM SE CONECTA
+// GERAR ID DO PARTICIPANTE
+// ============================================
+
+function gerarId() {
+
+    return Math.random()
+        .toString(36)
+        .substring(2, 10);
+
+}
+
+
+// ============================================
+// NOVA CONEXÃO
 // ============================================
 
 wss.on("connection", (socket) => {
 
-    console.log("👤 Novo participante conectado.");
+    console.log(
+        "👤 Novo participante conectado."
+    );
 
 
-    // Sala onde o participante está
+    // ID único desta pessoa
+    const id = gerarId();
+
+
+    // Sala atual
     let salaAtual = null;
 
 
     // ========================================
-    // RECEBER MENSAGEM
+    // RECEBER MENSAGENS
     // ========================================
 
     socket.on("message", (dados) => {
@@ -81,11 +90,13 @@ wss.on("connection", (socket) => {
         try {
 
             const mensagem =
-                JSON.parse(dados.toString());
+                JSON.parse(
+                    dados.toString()
+                );
 
 
             // ==================================
-            // ENTRAR EM UMA SALA
+            // ENTRAR NA SALA
             // ==================================
 
             if (mensagem.tipo === "entrar") {
@@ -94,12 +105,19 @@ wss.on("connection", (socket) => {
                     mensagem.sala;
 
 
-                // Criar sala se ela ainda não existir
+                if (!codigoSala) {
+
+                    return;
+
+                }
+
+
+                // Criar sala
                 if (!salas.has(codigoSala)) {
 
                     salas.set(
                         codigoSala,
-                        new Set()
+                        new Map()
                     );
 
                 }
@@ -109,71 +127,172 @@ wss.on("connection", (socket) => {
                     salas.get(codigoSala);
 
 
-                // Guardar a sala atual
-                salaAtual = codigoSala;
+                salaAtual =
+                    codigoSala;
 
 
-                // Avisar quantas pessoas já estavam
-                socket.send(JSON.stringify({
+                // ==================================
+                // AVISAR QUEM JÁ ESTAVA NA SALA
+                // ==================================
 
-                    tipo: "sala",
-
-                    participantes:
-                        participantes.size
-
-                }));
-
-
-                // Avisar aos participantes existentes
-                participantes.forEach((participante) => {
-
-                    participante.send(JSON.stringify({
-
-                        tipo: "novo-participante"
-
-                    }));
-
-                });
+                const participantesExistentes =
+                    Array.from(
+                        participantes.keys()
+                    );
 
 
-                // Adicionar o novo participante
-                participantes.add(socket);
+                socket.send(
+                    JSON.stringify({
+
+                        tipo: "sala",
+
+                        id: id,
+
+                        participantes:
+                            participantesExistentes
+
+                    })
+                );
+
+
+                // ==================================
+                // AVISAR OS OUTROS
+                // ==================================
+
+                participantes.forEach(
+                    (participante) => {
+
+                        participante.send(
+                            JSON.stringify({
+
+                                tipo:
+                                    "novo-participante",
+
+                                id:
+                                    id
+
+                            })
+                        );
+
+                    }
+                );
+
+
+                // ==================================
+                // ADICIONAR PARTICIPANTE
+                // ==================================
+
+                participantes.set(
+                    id,
+                    socket
+                );
 
 
                 console.log(
-                    `👤 Participante entrou na sala ${codigoSala}`
+                    `👤 ${id} entrou na sala ${codigoSala}`
                 );
 
             }
 
 
             // ==================================
-            // ENVIAR MENSAGEM PARA A SALA
+            // SINALIZAÇÃO WEBRTC
             // ==================================
 
-            if (mensagem.tipo === "sinalizacao") {
+            if (
+                mensagem.tipo ===
+                "sinalizacao"
+            ) {
 
                 const participantes =
                     salas.get(salaAtual);
 
 
                 if (!participantes) {
+
                     return;
+
                 }
 
 
-                participantes.forEach((participante) => {
+                const destino =
+                    mensagem.destino;
 
-                    // Não envia para quem mandou
-                    if (participante !== socket) {
+
+                // ==================================
+                // ENVIAR PARA UMA PESSOA ESPECÍFICA
+                // ==================================
+
+                if (destino) {
+
+                    const participante =
+                        participantes.get(
+                            destino
+                        );
+
+
+                    if (
+                        participante &&
+                        participante.readyState ===
+                        WebSocket.OPEN
+                    ) {
 
                         participante.send(
-                            JSON.stringify(mensagem)
+                            JSON.stringify({
+
+                                tipo:
+                                    "sinalizacao",
+
+                                origem:
+                                    id,
+
+                                sinal:
+                                    mensagem.sinal
+
+                            })
                         );
 
                     }
 
-                });
+
+                    return;
+
+                }
+
+
+                // ==================================
+                // COMPATIBILIDADE
+                // Enviar para todos os outros
+                // ==================================
+
+                participantes.forEach(
+                    (participante, participanteId) => {
+
+                        if (
+                            participanteId !== id &&
+                            participante.readyState ===
+                            WebSocket.OPEN
+                        ) {
+
+                            participante.send(
+                                JSON.stringify({
+
+                                    tipo:
+                                        "sinalizacao",
+
+                                    origem:
+                                        id,
+
+                                    sinal:
+                                        mensagem.sinal
+
+                                })
+                            );
+
+                        }
+
+                    }
+                );
 
             }
 
@@ -192,16 +311,20 @@ wss.on("connection", (socket) => {
 
 
     // ========================================
-    // QUANDO ALGUÉM DESCONECTA
+    // DESCONECTOU
     // ========================================
 
     socket.on("close", () => {
 
-        console.log("👋 Participante saiu.");
+        console.log(
+            `👋 ${id} saiu.`
+        );
 
 
         if (!salaAtual) {
+
             return;
+
         }
 
 
@@ -210,30 +333,57 @@ wss.on("connection", (socket) => {
 
 
         if (!participantes) {
+
             return;
+
         }
 
 
-        // Remover participante
-        participantes.delete(socket);
+        // Remover
+        participantes.delete(id);
 
 
-        // Avisar os outros
-        participantes.forEach((participante) => {
+        // ==================================
+        // AVISAR OS OUTROS
+        // ==================================
 
-            participante.send(JSON.stringify({
+        participantes.forEach(
+            (participante) => {
 
-                tipo: "participante-saiu"
+                if (
+                    participante.readyState ===
+                    WebSocket.OPEN
+                ) {
 
-            }));
+                    participante.send(
+                        JSON.stringify({
 
-        });
+                            tipo:
+                                "participante-saiu",
+
+                            id:
+                                id
+
+                        })
+                    );
+
+                }
+
+            }
+        );
 
 
-        // Se a sala ficou vazia, apagar
-        if (participantes.size === 0) {
+        // ==================================
+        // APAGAR SALA VAZIA
+        // ==================================
 
-            salas.delete(salaAtual);
+        if (
+            participantes.size === 0
+        ) {
+
+            salas.delete(
+                salaAtual
+            );
 
         }
 
@@ -250,10 +400,13 @@ const PORT =
     process.env.PORT || 3000;
 
 
-server.listen(PORT, () => {
+server.listen(
+    PORT,
+    () => {
 
-    console.log(
-        `🚀 LinkTalk Server rodando na porta ${PORT}`
-    );
+        console.log(
+            `🚀 LinkTalk Server rodando na porta ${PORT}`
+        );
 
-});
+    }
+);
