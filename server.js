@@ -1,10 +1,17 @@
 // ============================================
 // LinkTalk - Servidor de Sinalização
-// Vários participantes + WebRTC
+// Até 10 participantes por sala
 // ============================================
 
 const http = require("http");
 const WebSocket = require("ws");
+
+
+// ============================================
+// CONFIGURAÇÕES
+// ============================================
+
+const MAX_PARTICIPANTES = 10;
 
 
 // ============================================
@@ -35,26 +42,21 @@ const wss = new WebSocket.Server({
 // SALAS
 // ============================================
 //
-// Cada sala possui vários participantes.
+// Cada sala possui:
 //
 // sala
-// └── ABCD-1234
-//     ├── participante 1
-//     ├── participante 2
-//     ├── participante 3
-//     └── participante 4
+// └── código
+//     ├── ID → conexão
+//     ├── ID → conexão
+//     └── ...
 //
 // ============================================
 
 const salas = new Map();
-// ========================================
-// LIMITE DE PARTICIPANTES
-// ========================================
 
-const MAX_PARTICIPANTES = 10;
 
 // ============================================
-// GERAR ID DO PARTICIPANTE
+// GERAR ID ÚNICO
 // ============================================
 
 function gerarId() {
@@ -77,7 +79,7 @@ wss.on("connection", (socket) => {
     );
 
 
-    // ID único desta pessoa
+    // ID dessa pessoa
     const id = gerarId();
 
 
@@ -109,35 +111,27 @@ wss.on("connection", (socket) => {
                     mensagem.sala;
 
 
+                // Verificar código
                 if (!codigoSala) {
+
+                    socket.send(JSON.stringify({
+
+                        tipo: "erro",
+
+                        mensagem:
+                            "Código da sala inválido."
+
+                    }));
 
                     return;
 
-               // ========================================
-// VERIFICAR LIMITE DA SALA
-// ========================================
-
-if (participantes.size >= MAX_PARTICIPANTES) {
-
-    socket.send(JSON.stringify({
-
-        tipo: "sala-cheia",
-
-        limite: MAX_PARTICIPANTES
-
-    }));
-
-    console.log(
-        `🚫 Sala ${codigoSala} está cheia.`
-    );
-
-    socket.close();
-
-    return;
-}
+                }
 
 
-                // Criar sala
+                // ==================================
+                // CRIAR SALA
+                // ==================================
+
                 if (!salas.has(codigoSala)) {
 
                     salas.set(
@@ -152,12 +146,49 @@ if (participantes.size >= MAX_PARTICIPANTES) {
                     salas.get(codigoSala);
 
 
+                // ==================================
+                // VERIFICAR LIMITE
+                // ==================================
+
+                if (
+                    participantes.size >=
+                    MAX_PARTICIPANTES
+                ) {
+
+                    console.log(
+                        `🚫 Sala ${codigoSala} está cheia.`
+                    );
+
+
+                    socket.send(
+                        JSON.stringify({
+
+                            tipo: "sala-cheia",
+
+                            limite:
+                                MAX_PARTICIPANTES
+
+                        })
+                    );
+
+
+                    socket.close();
+
+                    return;
+
+                }
+
+
+                // ==================================
+                // GUARDAR SALA ATUAL
+                // ==================================
+
                 salaAtual =
                     codigoSala;
 
 
                 // ==================================
-                // AVISAR QUEM JÁ ESTAVA NA SALA
+                // PEGAR IDS EXISTENTES
                 // ==================================
 
                 const participantesExistentes =
@@ -165,6 +196,17 @@ if (participantes.size >= MAX_PARTICIPANTES) {
                         participantes.keys()
                     );
 
+
+                // ==================================
+                // AVISAR QUEM ESTÁ ENTRANDO
+                // ==================================
+                //
+                // A pessoa recebe a lista de
+                // quem já estava na sala.
+                //
+                // Depois o room.js cria uma
+                // conexão com cada um.
+                //
 
                 socket.send(
                     JSON.stringify({
@@ -181,30 +223,37 @@ if (participantes.size >= MAX_PARTICIPANTES) {
 
 
                 // ==================================
-                // AVISAR OS OUTROS
+                // AVISAR QUEM JÁ ESTAVA
                 // ==================================
 
                 participantes.forEach(
                     (participante) => {
 
-                        participante.send(
-                            JSON.stringify({
+                        if (
+                            participante.readyState ===
+                            WebSocket.OPEN
+                        ) {
 
-                                tipo:
-                                    "novo-participante",
+                            participante.send(
+                                JSON.stringify({
 
-                                id:
-                                    id
+                                    tipo:
+                                        "novo-participante",
 
-                            })
-                        );
+                                    id:
+                                        id
+
+                                })
+                            );
+
+                        }
 
                     }
                 );
 
 
                 // ==================================
-                // ADICIONAR PARTICIPANTE
+                // ADICIONAR À SALA
                 // ==================================
 
                 participantes.set(
@@ -215,6 +264,10 @@ if (participantes.size >= MAX_PARTICIPANTES) {
 
                 console.log(
                     `👤 ${id} entrou na sala ${codigoSala}`
+                );
+
+                console.log(
+                    `👥 Participantes: ${participantes.size}/${MAX_PARTICIPANTES}`
                 );
 
             }
@@ -228,6 +281,13 @@ if (participantes.size >= MAX_PARTICIPANTES) {
                 mensagem.tipo ===
                 "sinalizacao"
             ) {
+
+                if (!salaAtual) {
+
+                    return;
+
+                }
+
 
                 const participantes =
                     salas.get(salaAtual);
@@ -291,7 +351,10 @@ if (participantes.size >= MAX_PARTICIPANTES) {
                 // ==================================
 
                 participantes.forEach(
-                    (participante, participanteId) => {
+                    (
+                        participante,
+                        participanteId
+                    ) => {
 
                         if (
                             participanteId !== id &&
@@ -364,7 +427,10 @@ if (participantes.size >= MAX_PARTICIPANTES) {
         }
 
 
-        // Remover
+        // ==================================
+        // REMOVER PARTICIPANTE
+        // ==================================
+
         participantes.delete(id);
 
 
@@ -411,6 +477,11 @@ if (participantes.size >= MAX_PARTICIPANTES) {
             );
 
         }
+
+
+        console.log(
+            `👥 Sala ${salaAtual}: ${participantes.size}/${MAX_PARTICIPANTES}`
+        );
 
     });
 
