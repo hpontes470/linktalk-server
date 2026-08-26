@@ -11,6 +11,7 @@ const WebSocket = require("ws");
 // CONFIGURAÇÕES
 // ============================================
 
+const PORT = process.env.PORT || 3000;
 const MAX_PARTICIPANTES = 10;
 
 
@@ -21,10 +22,12 @@ const MAX_PARTICIPANTES = 10;
 const server = http.createServer((request, response) => {
 
     response.writeHead(200, {
-        "Content-Type": "text/plain"
+        "Content-Type": "text/plain; charset=utf-8"
     });
 
-    response.end("LinkTalk Server funcionando! 🚀");
+    response.end(
+        "LinkTalk Server funcionando! 🚀"
+    );
 
 });
 
@@ -42,13 +45,13 @@ const wss = new WebSocket.Server({
 // SALAS
 // ============================================
 //
-// Cada sala possui:
+// Map:
 //
-// sala
-// └── código
-//     ├── ID → conexão
-//     ├── ID → conexão
-//     └── ...
+// salas
+//   └── ABCD-1234
+//       ├── id1 -> socket
+//       ├── id2 -> socket
+//       └── id3 -> socket
 //
 // ============================================
 
@@ -56,7 +59,7 @@ const salas = new Map();
 
 
 // ============================================
-// GERAR ID ÚNICO
+// GERAR ID
 // ============================================
 
 function gerarId() {
@@ -69,26 +72,42 @@ function gerarId() {
 
 
 // ============================================
+// ENVIAR JSON
+// ============================================
+
+function enviar(socket, dados) {
+
+    if (
+        socket &&
+        socket.readyState === WebSocket.OPEN
+    ) {
+
+        socket.send(
+            JSON.stringify(dados)
+        );
+
+    }
+
+}
+
+
+// ============================================
 // NOVA CONEXÃO
 // ============================================
 
 wss.on("connection", (socket) => {
 
+    const id = gerarId();
+
+    let salaAtual = null;
+
     console.log(
-        "👤 Novo participante conectado."
+        `👤 Nova conexão: ${id}`
     );
 
 
-    // ID dessa pessoa
-    const id = gerarId();
-
-
-    // Sala atual
-    let salaAtual = null;
-
-
     // ========================================
-    // RECEBER MENSAGENS
+    // RECEBER MENSAGEM
     // ========================================
 
     socket.on("message", (dados) => {
@@ -111,26 +130,25 @@ wss.on("connection", (socket) => {
                     mensagem.sala;
 
 
-                // Verificar código
                 if (!codigoSala) {
 
-                    socket.send(JSON.stringify({
+                    enviar(socket, {
 
                         tipo: "erro",
 
                         mensagem:
                             "Código da sala inválido."
 
-                    }));
+                    });
 
                     return;
 
                 }
 
 
-                // ==================================
+                // --------------------------------
                 // CRIAR SALA
-                // ==================================
+                // --------------------------------
 
                 if (!salas.has(codigoSala)) {
 
@@ -146,31 +164,27 @@ wss.on("connection", (socket) => {
                     salas.get(codigoSala);
 
 
-                // ==================================
+                // --------------------------------
                 // VERIFICAR LIMITE
-                // ==================================
+                // --------------------------------
 
                 if (
                     participantes.size >=
                     MAX_PARTICIPANTES
                 ) {
 
+                    enviar(socket, {
+
+                        tipo: "sala-cheia",
+
+                        limite:
+                            MAX_PARTICIPANTES
+
+                    });
+
                     console.log(
-                        `🚫 Sala ${codigoSala} está cheia.`
+                        `🚫 Sala ${codigoSala} cheia.`
                     );
-
-
-                    socket.send(
-                        JSON.stringify({
-
-                            tipo: "sala-cheia",
-
-                            limite:
-                                MAX_PARTICIPANTES
-
-                        })
-                    );
-
 
                     socket.close();
 
@@ -179,71 +193,77 @@ wss.on("connection", (socket) => {
                 }
 
 
-                // ==================================
-                // GUARDAR SALA ATUAL
-                // ==================================
+                // --------------------------------
+                // GUARDAR SALA
+                // --------------------------------
 
                 salaAtual =
                     codigoSala;
 
 
-                // ==================================
+                // --------------------------------
                 // PEGAR IDS EXISTENTES
-                // ==================================
+                // --------------------------------
 
-                const participantesExistentes =
+                const idsExistentes =
                     Array.from(
                         participantes.keys()
                     );
 
 
-                // ==================================
-                // AVISAR QUEM ESTÁ ENTRANDO
-                // ==================================
-                //
-                // A pessoa recebe a lista de
-                // quem já estava na sala.
-                //
-                // Depois o room.js cria uma
-                // conexão com cada um.
-                //
+                // --------------------------------
+                // AVISAR O NOVO PARTICIPANTE
+                // --------------------------------
 
-                socket.send(
-                    JSON.stringify({
+                enviar(socket, {
 
-                        tipo: "sala",
+                    tipo: "sala",
 
-                        id: id,
+                    id: id,
 
-                        participantes:
-                            participantesExistentes
+                    participantes:
+                        idsExistentes,
 
-                    })
+                    quantidade:
+                        participantes.size,
+
+                    limite:
+                        MAX_PARTICIPANTES
+
+                });
+
+
+                // --------------------------------
+                // ADICIONAR À SALA
+                // --------------------------------
+
+                participantes.set(
+                    id,
+                    socket
                 );
 
 
-                // ==================================
-                // AVISAR QUEM JÁ ESTAVA
-                // ==================================
+                // --------------------------------
+                // AVISAR OS OUTROS
+                // --------------------------------
 
                 participantes.forEach(
-                    (participante) => {
+                    (participante, participanteId) => {
 
                         if (
-                            participante.readyState ===
-                            WebSocket.OPEN
+                            participanteId !== id
                         ) {
 
-                            participante.send(
-                                JSON.stringify({
+                            enviar(
+                                participante,
+                                {
 
                                     tipo:
                                         "novo-participante",
 
-                                    id:
-                                        id
+                                    id: id
 
-                                })
+                                }
                             );
 
                         }
@@ -252,23 +272,15 @@ wss.on("connection", (socket) => {
                 );
 
 
-                // ==================================
-                // ADICIONAR À SALA
-                // ==================================
-
-                participantes.set(
-                    id,
-                    socket
-                );
-
-
                 console.log(
-                    `👤 ${id} entrou na sala ${codigoSala}`
+                    `🏠 ${id} entrou em ${codigoSala}`
                 );
 
                 console.log(
-                    `👥 Participantes: ${participantes.size}/${MAX_PARTICIPANTES}`
+                    `👥 Pessoas na sala: ${participantes.size}`
                 );
+
+                return;
 
             }
 
@@ -304,9 +316,13 @@ wss.on("connection", (socket) => {
                     mensagem.destino;
 
 
-                // ==================================
-                // ENVIAR PARA UMA PESSOA ESPECÍFICA
-                // ==================================
+                const sinal =
+                    mensagem.sinal;
+
+
+                // --------------------------------
+                // DESTINO ESPECÍFICO
+                // --------------------------------
 
                 if (destino) {
 
@@ -316,14 +332,11 @@ wss.on("connection", (socket) => {
                         );
 
 
-                    if (
-                        participante &&
-                        participante.readyState ===
-                        WebSocket.OPEN
-                    ) {
+                    if (participante) {
 
-                        participante.send(
-                            JSON.stringify({
+                        enviar(
+                            participante,
+                            {
 
                                 tipo:
                                     "sinalizacao",
@@ -332,9 +345,9 @@ wss.on("connection", (socket) => {
                                     id,
 
                                 sinal:
-                                    mensagem.sinal
+                                    sinal
 
-                            })
+                            }
                         );
 
                     }
@@ -345,25 +358,21 @@ wss.on("connection", (socket) => {
                 }
 
 
-                // ==================================
-                // COMPATIBILIDADE
-                // Enviar para todos os outros
-                // ==================================
+                // --------------------------------
+                // SEM DESTINO
+                // Envia para todos
+                // --------------------------------
 
                 participantes.forEach(
-                    (
-                        participante,
-                        participanteId
-                    ) => {
+                    (participante, participanteId) => {
 
                         if (
-                            participanteId !== id &&
-                            participante.readyState ===
-                            WebSocket.OPEN
+                            participanteId !== id
                         ) {
 
-                            participante.send(
-                                JSON.stringify({
+                            enviar(
+                                participante,
+                                {
 
                                     tipo:
                                         "sinalizacao",
@@ -372,15 +381,17 @@ wss.on("connection", (socket) => {
                                         id,
 
                                     sinal:
-                                        mensagem.sinal
+                                        sinal
 
-                                })
+                                }
                             );
 
                         }
 
                     }
                 );
+
+                return;
 
             }
 
@@ -389,9 +400,10 @@ wss.on("connection", (socket) => {
         catch (erro) {
 
             console.log(
-                "❌ Erro ao processar mensagem:",
-                erro
+                "❌ Erro ao processar mensagem:"
             );
+
+            console.log(erro);
 
         }
 
@@ -405,7 +417,7 @@ wss.on("connection", (socket) => {
     socket.on("close", () => {
 
         console.log(
-            `👋 ${id} saiu.`
+            `👋 ${id} desconectou.`
         );
 
 
@@ -427,46 +439,39 @@ wss.on("connection", (socket) => {
         }
 
 
-        // ==================================
-        // REMOVER PARTICIPANTE
-        // ==================================
+        // --------------------------------
+        // REMOVER
+        // --------------------------------
 
         participantes.delete(id);
 
 
-        // ==================================
+        // --------------------------------
         // AVISAR OS OUTROS
-        // ==================================
+        // --------------------------------
 
         participantes.forEach(
             (participante) => {
 
-                if (
-                    participante.readyState ===
-                    WebSocket.OPEN
-                ) {
+                enviar(
+                    participante,
+                    {
 
-                    participante.send(
-                        JSON.stringify({
+                        tipo:
+                            "participante-saiu",
 
-                            tipo:
-                                "participante-saiu",
+                        id: id
 
-                            id:
-                                id
-
-                        })
-                    );
-
-                }
+                    }
+                );
 
             }
         );
 
 
-        // ==================================
+        // --------------------------------
         // APAGAR SALA VAZIA
-        // ==================================
+        // --------------------------------
 
         if (
             participantes.size === 0
@@ -476,12 +481,19 @@ wss.on("connection", (socket) => {
                 salaAtual
             );
 
+            console.log(
+                `🗑️ Sala ${salaAtual} apagada.`
+            );
+
         }
 
+        else {
 
-        console.log(
-            `👥 Sala ${salaAtual}: ${participantes.size}/${MAX_PARTICIPANTES}`
-        );
+            console.log(
+                `👥 Restam ${participantes.size} pessoas na sala.`
+            );
+
+        }
 
     });
 
@@ -489,12 +501,23 @@ wss.on("connection", (socket) => {
 
 
 // ============================================
-// INICIAR SERVIDOR
+// ERROS DO SERVIDOR
 // ============================================
 
-const PORT =
-    process.env.PORT || 3000;
+wss.on("error", (erro) => {
 
+    console.log(
+        "❌ Erro no WebSocket:"
+    );
+
+    console.log(erro);
+
+});
+
+
+// ============================================
+// INICIAR
+// ============================================
 
 server.listen(
     PORT,
@@ -502,6 +525,10 @@ server.listen(
 
         console.log(
             `🚀 LinkTalk Server rodando na porta ${PORT}`
+        );
+
+        console.log(
+            `👥 Limite por sala: ${MAX_PARTICIPANTES}`
         );
 
     }
