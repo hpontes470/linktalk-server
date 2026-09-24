@@ -1,17 +1,12 @@
-// ============================================
-// LinkTalk - Servidor de Sinalização
-// Até 10 participantes por sala
-// ============================================
-
 const http = require("http");
 const WebSocket = require("ws");
 
 const PORT = process.env.PORT || 3000;
 const MAX_PARTICIPANTES = 10;
 
-// ============================================
+// =====================================================
 // SERVIDOR HTTP
-// ============================================
+// =====================================================
 
 const server = http.createServer((request, response) => {
     response.writeHead(200, {
@@ -21,89 +16,67 @@ const server = http.createServer((request, response) => {
     response.end("LinkTalk Server funcionando! 🚀");
 });
 
-// ============================================
+// =====================================================
 // WEBSOCKET
-// ============================================
+// =====================================================
 
-const wss = new WebSocket.Server({
-    server: server
-});
+const wss = new WebSocket.Server({ server });
 
-// ============================================
-// SALAS
-// ============================================
-
-// Estrutura:
-//
-// salas = {
-//     "ABC123": Map {
-//         "id123": {
-//             socket: WebSocket,
-//             nome: "Henrique"
-//         }
-//     }
-// }
-
+// Todas as salas ficam armazenadas aqui
+// sala -> participantes
 const salas = new Map();
 
-// ============================================
-// GERAR ID DO PARTICIPANTE
-// ============================================
+// =====================================================
+// FUNÇÕES AUXILIARES
+// =====================================================
 
+// Cria um ID aleatório para cada participante
 function gerarId() {
-    return Math.random()
-        .toString(36)
-        .substring(2, 10);
+    return Math.random().toString(36).substring(2, 10);
 }
 
-// ============================================
-// ENVIAR MENSAGEM
-// ============================================
-
+// Envia uma mensagem para um participante
 function enviar(socket, dados) {
-    if (
-        socket &&
-        socket.readyState === WebSocket.OPEN
-    ) {
+    if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(dados));
     }
 }
 
-// ============================================
+// =====================================================
 // NOVA CONEXÃO
-// ============================================
+// =====================================================
 
 wss.on("connection", (socket) => {
 
+    // ID único deste participante
     const id = gerarId();
 
+    // Sala atual
     let salaAtual = null;
 
+    // Nome do participante
     let nomeParticipante = "Participante";
 
     console.log(`👤 Nova conexão: ${id}`);
 
-    // ========================================
+    // =================================================
     // RECEBER MENSAGENS
-    // ========================================
+    // =================================================
 
     socket.on("message", (dados) => {
 
         try {
 
-            const mensagem = JSON.parse(
-                dados.toString()
-            );
+            const mensagem = JSON.parse(dados.toString());
 
-            // ====================================
+            // =============================================
             // ENTRAR NA SALA
-            // ====================================
+            // =============================================
 
             if (mensagem.tipo === "entrar") {
 
                 const codigoSala = mensagem.sala;
 
-                // Verifica sala
                 if (!codigoSala) {
 
                     enviar(socket, {
@@ -114,149 +87,100 @@ wss.on("connection", (socket) => {
                     return;
                 }
 
-                // ==================================
-                // PEGAR NOME
-                // ==================================
-
+                // Pega o nome enviado pelo navegador
                 if (
                     typeof mensagem.nome === "string" &&
                     mensagem.nome.trim() !== ""
                 ) {
 
                     nomeParticipante =
-                        mensagem.nome
-                            .trim()
-                            .substring(0, 30);
+                        mensagem.nome.trim().substring(0, 30);
 
                 } else {
 
-                    nomeParticipante =
-                        "Participante";
+                    nomeParticipante = "Participante";
                 }
 
-                // ==================================
-                // CRIAR SALA SE NÃO EXISTIR
-                // ==================================
-
+                // Se a sala ainda não existe, cria
                 if (!salas.has(codigoSala)) {
-
-                    salas.set(
-                        codigoSala,
-                        new Map()
-                    );
+                    salas.set(codigoSala, new Map());
                 }
 
-                const participantes =
-                    salas.get(codigoSala);
+                const participantes = salas.get(codigoSala);
 
-                // ==================================
-                // VERIFICAR LIMITE
-                // ==================================
-
-                if (
-                    participantes.size >=
-                    MAX_PARTICIPANTES
-                ) {
+                // Verifica limite
+                if (participantes.size >= MAX_PARTICIPANTES) {
 
                     enviar(socket, {
                         tipo: "sala-cheia",
                         limite: MAX_PARTICIPANTES
                     });
 
-                    console.log(
-                        `🚫 Sala ${codigoSala} cheia.`
-                    );
+                    console.log(`🚫 Sala ${codigoSala} cheia.`);
 
                     socket.close();
 
                     return;
                 }
 
-                // ==================================
-                // DEFINIR SALA ATUAL
-                // ==================================
-
+                // Guarda a sala atual
                 salaAtual = codigoSala;
 
-                // ==================================
-                // LISTA DOS PARTICIPANTES EXISTENTES
-                // ==================================
+                // =========================================
+                // PEGAR PARTICIPANTES QUE JÁ ESTÃO NA SALA
+                // =========================================
 
                 const participantesExistentes =
-                    Array.from(
-                        participantes.entries()
-                    ).map(
-                        ([participanteId, participante]) => {
-
-                            return {
-                                id: participanteId,
-                                nome: participante.nome
-                            };
-
-                        }
+                    Array.from(participantes.entries()).map(
+                        ([participanteId, participante]) => ({
+                            id: participanteId,
+                            nome: participante.nome
+                        })
                     );
 
-                // ==================================
+                // =========================================
                 // AVISAR QUEM ESTÁ ENTRANDO
-                // SOBRE QUEM JÁ ESTÁ NA SALA
-                // ==================================
+                // =========================================
 
                 enviar(socket, {
-
                     tipo: "sala",
 
                     id: id,
 
-                    participantes:
-                        participantesExistentes,
+                    participantes: participantesExistentes,
 
-                    quantidade:
-                        participantes.size,
+                    quantidade: participantes.size,
 
-                    limite:
-                        MAX_PARTICIPANTES
+                    limite: MAX_PARTICIPANTES
                 });
 
-                // ==================================
-                // ADICIONAR PARTICIPANTE
-                // ==================================
+                // =========================================
+                // ADICIONAR PARTICIPANTE À SALA
+                // =========================================
 
                 participantes.set(id, {
-
                     socket: socket,
-
                     nome: nomeParticipante
                 });
 
-                // ==================================
+                // =========================================
                 // AVISAR OS OUTROS PARTICIPANTES
-                // ==================================
-                //
-                // "novo-participante" agora também
-                // envia o nome.
-                //
+                // =========================================
 
                 participantes.forEach(
                     (participante, participanteId) => {
 
-                        if (
-                            participanteId !== id
-                        ) {
+                        if (participanteId !== id) {
 
-                            enviar(
-                                participante.socket,
-                                {
-                                    tipo:
-                                        "novo-participante",
+                            enviar(participante.socket, {
 
-                                    id: id,
+                                tipo: "novo-participante",
 
-                                    nome:
-                                        nomeParticipante
-                                }
-                            );
+                                id: id,
+
+                                nome: nomeParticipante
+                            });
                         }
-
                     }
                 );
 
@@ -271,9 +195,130 @@ wss.on("connection", (socket) => {
                 return;
             }
 
-            // ====================================
+            // =================================================
+            // SISTEMA DE CONVITES
+            // =================================================
+
+            if (mensagem.tipo === "convite") {
+
+                // Só pode enviar convite se estiver em uma sala
+                if (!salaAtual) {
+
+                    enviar(socket, {
+                        tipo: "erro",
+                        mensagem: "Você não está em uma sala."
+                    });
+
+                    return;
+                }
+
+                const participantes = salas.get(salaAtual);
+
+                if (!participantes) {
+                    return;
+                }
+
+                // ID da pessoa que receberá o convite
+                const destino = mensagem.destino;
+
+                if (!destino) {
+
+                    enviar(socket, {
+                        tipo: "erro",
+                        mensagem: "Participante de destino não informado."
+                    });
+
+                    return;
+                }
+
+                // Procura a pessoa
+                const participanteDestino =
+                    participantes.get(destino);
+
+                if (!participanteDestino) {
+
+                    enviar(socket, {
+                        tipo: "erro",
+                        mensagem: "Participante não encontrado."
+                    });
+
+                    return;
+                }
+
+                // =========================================
+                // ENVIAR CONVITE
+                // =========================================
+
+                enviar(participanteDestino.socket, {
+
+                    tipo: "convite",
+
+                    de: id,
+
+                    nome: nomeParticipante,
+
+                    sala: salaAtual
+                });
+
+                console.log(
+                    `🔔 ${nomeParticipante} enviou um convite para ${participanteDestino.nome}`
+                );
+
+                return;
+            }
+
+            // =================================================
+            // RESPOSTA AO CONVITE
+            // =================================================
+
+            if (mensagem.tipo === "resposta-convite") {
+
+                if (!salaAtual) {
+                    return;
+                }
+
+                const participantes = salas.get(salaAtual);
+
+                if (!participantes) {
+                    return;
+                }
+
+                const destino = mensagem.destino;
+
+                if (!destino) {
+                    return;
+                }
+
+                const participanteDestino =
+                    participantes.get(destino);
+
+                if (!participanteDestino) {
+                    return;
+                }
+
+                // Encaminha a resposta
+                enviar(participanteDestino.socket, {
+
+                    tipo: "resposta-convite",
+
+                    de: id,
+
+                    nome: nomeParticipante,
+
+                    aceitou: mensagem.aceitou === true
+                });
+
+                console.log(
+                    `🔔 Resposta de ${nomeParticipante}: ` +
+                    `${mensagem.aceitou === true ? "aceitou" : "recusou"}`
+                );
+
+                return;
+            }
+
+            // =================================================
             // SINALIZAÇÃO WEBRTC
-            // ====================================
+            // =================================================
 
             if (mensagem.tipo === "sinalizacao") {
 
@@ -281,22 +326,19 @@ wss.on("connection", (socket) => {
                     return;
                 }
 
-                const participantes =
-                    salas.get(salaAtual);
+                const participantes = salas.get(salaAtual);
 
                 if (!participantes) {
                     return;
                 }
 
-                const destino =
-                    mensagem.destino;
+                const destino = mensagem.destino;
 
-                const sinal =
-                    mensagem.sinal;
+                const sinal = mensagem.sinal;
 
-                // ==================================
-                // ENVIO PARA UM PARTICIPANTE
-                // ==================================
+                // =============================================
+                // SINALIZAÇÃO PARA UMA PESSOA ESPECÍFICA
+                // =============================================
 
                 if (destino) {
 
@@ -305,27 +347,22 @@ wss.on("connection", (socket) => {
 
                     if (participante) {
 
-                        enviar(
-                            participante.socket,
-                            {
-                                tipo:
-                                    "sinalizacao",
+                        enviar(participante.socket, {
 
-                                origem:
-                                    id,
+                            tipo: "sinalizacao",
 
-                                sinal:
-                                    sinal
-                            }
-                        );
+                            origem: id,
+
+                            sinal: sinal
+                        });
                     }
 
                     return;
                 }
 
-                // ==================================
-                // ENVIO PARA TODOS
-                // ==================================
+                // =============================================
+                // SINALIZAÇÃO PARA TODOS
+                // =============================================
 
                 participantes.forEach(
                     (participante, participanteId) => {
@@ -336,21 +373,15 @@ wss.on("connection", (socket) => {
                             WebSocket.OPEN
                         ) {
 
-                            enviar(
-                                participante.socket,
-                                {
-                                    tipo:
-                                        "sinalizacao",
+                            enviar(participante.socket, {
 
-                                    origem:
-                                        id,
+                                tipo: "sinalizacao",
 
-                                    sinal:
-                                        sinal
-                                }
-                            );
+                                origem: id,
+
+                                sinal: sinal
+                            });
                         }
-
                     }
                 );
 
@@ -365,60 +396,41 @@ wss.on("connection", (socket) => {
 
             console.log(erro);
         }
-
     });
 
-    // ========================================
+    // =================================================
     // PARTICIPANTE DESCONECTOU
-    // ========================================
+    // =================================================
 
     socket.on("close", () => {
 
-        console.log(
-            `👋 ${id} desconectou.`
-        );
+        console.log(`👋 ${id} desconectou.`);
 
         if (!salaAtual) {
             return;
         }
 
-        const participantes =
-            salas.get(salaAtual);
+        const participantes = salas.get(salaAtual);
 
         if (!participantes) {
             return;
         }
 
-        // ==================================
-        // REMOVER PARTICIPANTE
-        // ==================================
-
+        // Remove da sala
         participantes.delete(id);
 
-        // ==================================
-        // AVISAR OS OUTROS
-        // ==================================
+        // Avisa os outros participantes
+        participantes.forEach((participante) => {
 
-        participantes.forEach(
-            (participante) => {
+            enviar(participante.socket, {
 
-                enviar(
-                    participante.socket,
-                    {
-                        tipo:
-                            "participante-saiu",
+                tipo: "participante-saiu",
 
-                        id: id
-                    }
-                );
+                id: id
+            });
+        });
 
-            }
-        );
-
-        // ==================================
-        // APAGAR SALA VAZIA
-        // ==================================
-
+        // Se ninguém ficou, apaga a sala
         if (participantes.size === 0) {
 
             salas.delete(salaAtual);
@@ -433,28 +445,23 @@ wss.on("connection", (socket) => {
                 `👥 Restam ${participantes.size} pessoas na sala.`
             );
         }
-
     });
-
 });
 
-// ============================================
+// =====================================================
 // ERROS DO WEBSOCKET
-// ============================================
+// =====================================================
 
 wss.on("error", (erro) => {
 
-    console.log(
-        "❌ Erro no WebSocket:"
-    );
+    console.log("❌ Erro no WebSocket:");
 
     console.log(erro);
-
 });
 
-// ============================================
+// =====================================================
 // INICIAR SERVIDOR
-// ============================================
+// =====================================================
 
 server.listen(PORT, () => {
 
@@ -466,4 +473,7 @@ server.listen(PORT, () => {
         `👥 Limite por sala: ${MAX_PARTICIPANTES}`
     );
 
+    console.log(
+        `🔔 Sistema de convites ativado!`
+    );
 });
